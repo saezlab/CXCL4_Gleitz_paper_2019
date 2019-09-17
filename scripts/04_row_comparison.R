@@ -1,5 +1,24 @@
-setwd("~/Dropbox/CXCL4_gleitz_paper/")
+#This is a script designed to analysis an RNA counts dataset.
+#Copyright (C) 2019  Aurelien Dugourd
 
+#This program is free software: you can redistribute it and/or modify
+#it under the terms of the GNU General Public License as published by
+#the Free Software Foundation, either version 3 of the License, or
+#(at your option) any later version.
+
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+
+#You should have received a copy of the GNU General Public License
+#along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+#Set the working directory
+setwd("~/Dropbox/CXCL4_gleitz_paper/") #There you should put the path to the main directory of the analysis "CXCL4_gleitz_paper"
+
+#Package loading
 library(readr)
 library(vsn)
 library(limma)
@@ -8,13 +27,17 @@ library(pheatmap)
 library(ggplot2)
 library(grid)
 library(gridExtra)
+library(QQperm)
 
 source("scripts/support_functions.R")
 source("scripts/heatmap_support.R")
 source("scripts/limmaWrapper.R")
 
-######## DATA CLEANING ########
+##############################################################
+#######           DATA LOADING AND CLEANING          #########
+##############################################################
 
+### CREATE DATAFRAMES TO SUMMARISE THE EXPERIMENTAL DESIGN
 full_targets <- as.data.frame(read_delim("support/full_targets.csv", 
                                          ";", escape_double = FALSE, trim_ws = TRUE))
 
@@ -30,6 +53,7 @@ full_targets$sample <- paste(full_targets$`Mouse group`,full_targets$replicates,
 targets <- full_targets[,c(12,10)]
 names(targets) <- c("sample","condition")
 
+### IMPORT THE COUNT FILES AND COMBINE THEM IN A SINGLE DATAFRAME
 count_file_list <- list.files("data/count_files/", full.names = T)
 count_file_names <- gsub("[.]counts","",list.files("data/count_files/", full.names = F))
 
@@ -66,6 +90,7 @@ names(batches) <- c("ID",targets$sample)
 row.names(batches) <- batches$ID
 batches <- batches[,-1]
 
+### REMOVE LOW COUNTS
 SDs <- apply(batches,1,sd)
 means <- apply(batches,1,mean)
 
@@ -73,19 +98,23 @@ batches <- batches[means > 50,]
 
 batches[batches == 0] <- 0.1
 
-########### NORMALISATION ##########
+### NORMALISATION WITH VSN
 
 fit <- vsnMatrix(as.matrix(batches))
 meanSdPlot(fit)
 batches <- as.data.frame(predict(fit,as.matrix(batches)))
 
+##############################################################
+#######             DIFFERENTIAL ANALYSIS            #########
+##############################################################
 
-########## LIMMA DIFFERENTIAL ANALYSIS ############
-
+### DEFINE THE CONTRASTS OF THE DIFFERENTIAL ANALYSIS
 comparisons <- list("MegaK_CXCL4_KO" = c(2,-1), "MegaK_WT" = c(4,-3), "Stromal_CXCL4_KO" = c(6,-5), "Stromal_WT" = c(8,-7))
 
+### RUN LIMMA FOR DIFFERENTIAL ANALYSIS
 limmaRes <- runLimma(batches,targets,comparisons)
 
+### FORMAT LIMMA RESULTS
 ttop_list <- list()
 for(i in 1:length(comparisons))
 {
@@ -93,13 +122,7 @@ for(i in 1:length(comparisons))
 }
 names(ttop_list) <- names(comparisons)
 
-View(ttop_list[[1]])
-View(ttop_list[[2]])
-View(ttop_list[[3]])
-View(ttop_list[[4]])
-
-library(QQperm)
-
+### CHECK THE PVALUE DISTRIBUTION WITH QQPLOTS
 expected <- pnorm(rnorm(length(ttop_list[[1]][,1])))
 
 pdf("visualisation/qqplot_MegaK_CXCL4_KO.pdf")
@@ -118,6 +141,7 @@ pdf("visualisation/qqplot_Stromal_WT.pdf")
 qqplot(P.perm = sort(expected), P.observed = sort(ttop_list[[4]][,5]), xlim = c(0,6), ylim = c(0,6))
 dev.off()
 
+### FORMAT THE DIFFERENTIAL ANALYSIS RESULTS
 for(i in 1:length(comparisons))
 {
   if( i == 1)
@@ -131,12 +155,17 @@ for(i in 1:length(comparisons))
 }
 names(t_table) <- c("ID",names(comparisons))
 
-############ PROGENY ############
+##############################################################
+#######               PROGENY ANALYSIS               #########
+##############################################################
 
-
+### LOAD THE PROGENY MODEL MATRIX
 model_matrix <- as.data.frame(read_csv("support/progeny_matrix_mouse_v1.csv"))
+
+### RUN PROGENY
 progeny_res <- runProgenyFast(t_table, model_matrix)
 
+### FORMAT PROGENY RESULTS AND MAKE HEATMAP
 progeny_df <- progeny_res
 
 t <- as.vector(t(progeny_df))
@@ -148,6 +177,8 @@ pheatmap(progeny_df[,c(2,1)], display_numbers = T, cluster_cols = F, color = pal
 pheatmap(progeny_df[,c(4,3)], display_numbers = T, cluster_cols = F, color = palette)
 
 pheatmap(progeny_df[,c(2,1,3,4)], display_numbers = T, cluster_cols = F, color = palette, filename = "visualisation/progeny_row_comp.pdf")
+
+### MAKE HEATMAP OF PATHWAY RESPONSIVE GENES
 dir.create("visualisation/heatProgeny/")
 heatProgeny(t_table = t_table, model_mat = model_matrix, pathway = "JAK-STAT", out_dir = "visualisation/heatProgeny/", height = 3, width = 5)
 heatProgeny(t_table = t_table, model_mat = model_matrix, pathway = "TNFa", out_dir = "visualisation/heatProgeny/", height = 3, width = 5)
@@ -157,6 +188,7 @@ heatProgeny(t_table = t_table, model_mat = model_matrix, pathway = "TGFb", out_d
 heatProgeny(t_table = t_table, model_mat = model_matrix, pathway = "TGFb", out_dir = "visualisation/heatProgeny/", height = 3, width = 5)
 heatProgeny(t_table = t_table, model_mat = model_matrix, pathway = "Trail", out_dir = "visualisation/heatProgeny/", height = 3, width = 5)
 
+### COMPUTE PVALUE FOR PROGENY Z-SCORES AND MAKE HEATMAP
 progeny_pvals <- as.data.frame(apply(progeny_df, 2, pnorm))
 progeny_pvals[] <- lapply(progeny_pvals, function(x){ifelse(x > 0.5, 1 - x, x)})
 
@@ -169,18 +201,26 @@ dev.off()
 dev.off()
 
 pheatmap(progeny_pvals, display_numbers = T, cluster_cols = F, cluster_rows = F, color = palette)
-########### DOROTHEA TF ACTIVITY ##############
+
+##############################################################
+#######              DOROTHEA ANALYSIS               #########
+##############################################################
+
 source("scripts/viperWrapper.R")
+
+### IMPORT DOROTHEA REGULONS
 dorothea_regulon_mouse_v1 <- as.data.frame(read_csv("support/dorothea_regulon_mouse_v1.csv"))
 
 dorothea_regulon_mouse_viper_AB <- df_to_viper_regulon(dorothea_regulon_mouse_v1[dorothea_regulon_mouse_v1$confidence %in% c("A","B"),c(3,1,4)])
 
 TF_activity_viper <- runViper(ttop_list, regulon = dorothea_regulon_mouse_viper_AB)
 
+### RUN VIPER
 TF_activity_viper_df <- makeViperResDf(viperResList = TF_activity_viper)
 row.names(TF_activity_viper_df) <- TF_activity_viper_df$ID
 TF_activity_viper_df <- TF_activity_viper_df[,-1]
 
+###MAKE HEATMAP OF TF ACTIVITIES
 t <- as.vector(t(TF_activity_viper_df))
 palette1 <- createLinearColors(t[t < 0],withZero = F , maximum = 60)
 palette2 <- createLinearColors(t[t > 0],withZero = F , maximum = 40)
@@ -191,6 +231,7 @@ pheatmap(t(TF_activity_viper_df[rowSums(abs(TF_activity_viper_df)) > 5,]), clust
 TF_pvals <- as.data.frame(apply(TF_activity_viper_df, 2, pnorm))
 TF_pvals[] <- lapply(TF_pvals, function(x){ifelse(x > 0.5, 1 - x, x)})
 
+### COMPUTE P-VALUES ASSOCIETED WIT HTF ACTIVITY Z-SCORES
 t <- as.vector(t(TF_pvals))
 palette1 <- createLinearColors(t[t > 0],withZero = F , maximum = 99, my_colors =  c("red","royalblue3","white"))
 # palette2 <- createLinearColors(t[t < 0],withZero = F , maximum = 1)
@@ -200,10 +241,11 @@ dev.off()
 
 pheatmap(t(TF_pvals[rowSums(abs(TF_activity_viper_df)) > 5,]), display_numbers = T, cluster_cols = F, cluster_rows = F, color = palette)
 
+### MAKE SCATTER PLOTS OF PATHWAY RESPONSIVE GENES OF PROGENY
 scats <- progenyScatter(t_table, model_matrix)
 saveProgenyPlots(scats,names(comparisons),"visualisation/progeny_plots_row_comp/")
 
-
+### FORMAT THE TF ACTIVITY DATAFRAME
 dorothea_AB <- dorothea_regulon_mouse_v1[dorothea_regulon_mouse_v1$confidence %in% c("A","B"),c(3,1,4)]
 names(dorothea_AB)[3] <- "weight"
 
