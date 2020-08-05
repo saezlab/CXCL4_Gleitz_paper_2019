@@ -4,6 +4,12 @@ Simply run the scripts in their numbered order in /scripts
 
 Install necessary packages when required.
 
+If you wish to estimate transcription factor activites and pathway activities with your own RNA data check out our tools :
+
+https://github.com/saezlab/dorothea (TF activities)
+
+https://github.com/saezlab/progeny (pathway activities)
+
 # Licence
 
 Copyright (C) 2019  <Aurelien Dugourd>
